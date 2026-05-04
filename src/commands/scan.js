@@ -86,6 +86,12 @@ module.exports = {
               // Parser le contenu + titre comme poste
               const profile = parseContractMessage(content, threadTitle) || { poste: threadTitle };
 
+              // Ignorer si pas assez d'infos pour créer un dossier
+              if (!profile.id_employe && (!profile.nom || !profile.prenom)) {
+                totalSkip++;
+                continue;
+              }
+
               // Photo si présente
               const photoUrl = starter.attachments?.find(a =>
                 a.contentType?.startsWith('image/') ||
