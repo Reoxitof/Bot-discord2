@@ -1,6 +1,7 @@
 /**
- * !scan — Trouve automatiquement tous les forums dans la catégorie intérimaire
- * et pousse les posts vers le site Elite Corp.
+ * !scan — Scanne tous les forums de la catégorie Intérimaire,
+ * lit le titre (= métier/poste) + contenu de chaque post,
+ * pousse vers le site Elite Corp, et supprime les messages du bot.
  * Accès : mods/admins + IDs autorisés
  */
 const { EmbedBuilder, ChannelType } = require('discord.js');
@@ -17,33 +18,38 @@ module.exports = {
     if (!isAllowed(message.member)) return;
 
     const guild = message.guild;
-    const statusMsg = await message.channel.send('🔍 Recherche des forums intérimaires...').catch(() => null);
+
+    // Message de statut — sera supprimé à la fin
+    const statusMsg = await message.channel.send('🔍 Scan des forums intérimaires en cours...').catch(() => null);
 
     try {
-      // Fetch tous les salons du serveur
+      // Fetch tous les salons
       await guild.channels.fetch();
 
-      // Trouver tous les forums dans la catégorie intérimaire
-      const forums = guild.channels.cache.filter(c =>
-        c.type === ChannelType.GuildForum && c.parentId === INTERIM_CATEGORY_ID
+      // Tous les salons dans la catégorie intérimaire (forum + texte)
+      const channelsInCategory = guild.channels.cache.filter(c =>
+        c.parentId === INTERIM_CATEGORY_ID && (
+          c.type === ChannelType.GuildForum ||
+          c.type === ChannelType.GuildText  ||
+          c.type === ChannelType.GuildAnnouncement
+        )
       );
 
-      // Si aucun forum dans la catégorie, chercher par nom
-      let forumsToScan = [...forums.values()];
+      let forumsToScan = [...channelsInCategory.values()];
 
+      // Fallback : tous les forums du serveur si catégorie vide
       if (!forumsToScan.length) {
-        // Fallback : chercher tous les forums du serveur avec un nom lié aux intérimaires
-        const allForums = guild.channels.cache.filter(c =>
+        forumsToScan = [...guild.channels.cache.filter(c =>
           c.type === ChannelType.GuildForum
-        );
-        forumsToScan = [...allForums.values()];
+        ).values()];
       }
 
       if (!forumsToScan.length) {
-        return statusMsg?.edit('❌ Aucun salon Forum trouvé sur ce serveur.').catch(() => {});
+        await statusMsg?.delete().catch(() => {});
+        return message.channel.send('❌ Aucun salon trouvé dans la catégorie intérimaire.').then(m => {
+          setTimeout(() => m.delete().catch(() => {}), 5000);
+        }).catch(() => {});
       }
-
-      await statusMsg?.edit(`🔍 ${forumsToScan.length} forum(s) trouvé(s) — scan en cours...`).catch(() => {});
 
       let totalOk = 0;
       let totalSkip = 0;
@@ -52,12 +58,12 @@ module.exports = {
 
       for (const forum of forumsToScan) {
         try {
-          // Threads actifs
-          const active = await forum.threads.fetchActive().catch(() => null);
-          const archived = await forum.threads.fetchArchived({ limit: 100 }).catch(() => null);
+          // Récupérer threads actifs + archivés
+          const active   = await forum.threads?.fetchActive().catch(() => null);
+          const archived = await forum.threads?.fetchArchived({ limit: 100 }).catch(() => null);
 
           const threads = [
-            ...(active?.threads?.values() || []),
+            ...(active?.threads?.values()   || []),
             ...(archived?.threads?.values() || [])
           ];
 
@@ -65,17 +71,29 @@ module.exports = {
 
           for (const thread of threads) {
             try {
+              // Récupérer le message initial du post
               const starter = await thread.fetchStarterMessage().catch(() => null);
               if (!starter) { totalSkip++; continue; }
 
-              const content = starter.content.trim();
-              const profile = parseContractMessage(content, thread.name) || { poste: thread.name };
+              // Supprimer les messages du bot dans ce thread
+              await deleteBotMessages(thread, client.user.id);
 
+              const content = starter.content.trim();
+
+              // Titre du post = poste/métier
+              const threadTitle = thread.name;
+
+              // Parser le contenu + titre comme poste
+              const profile = parseContractMessage(content, threadTitle) || { poste: threadTitle };
+
+              // Photo si présente
               const photoUrl = starter.attachments?.find(a =>
-                a.contentType?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.name || '')
+                a.contentType?.startsWith('image/') ||
+                /\.(png|jpg|jpeg|gif|webp)$/i.test(a.name || '')
               )?.url || null;
 
-              await syncProfile({
+              // Envoyer vers Elite Corp
+              const sent = await syncProfile({
                 messageId:       starter.id,
                 threadId:        thread.id,
                 discordUserId:   starter.author.id,
@@ -89,7 +107,7 @@ module.exports = {
               });
 
               totalOk++;
-              await new Promise(r => setTimeout(r, 500));
+              await new Promise(r => setTimeout(r, 300));
 
             } catch (e) {
               console.error(`[SCAN] Erreur thread "${thread.name}" :`, e.message);
@@ -101,28 +119,48 @@ module.exports = {
         }
       }
 
+      // Supprimer le message de statut
+      await statusMsg?.delete().catch(() => {});
+
+      // Envoyer le résumé (auto-supprimé après 15s)
       const embed = new EmbedBuilder()
         .setColor(totalOk > 0 ? 0x57F287 : 0xED4245)
         .setTitle('📊 Scan terminé')
         .addFields(
-          { name: '📁 Forums scannés', value: String(forumsToScan.length), inline: true },
-          { name: '🗂️ Posts trouvés',  value: String(totalThreads),        inline: true },
-          { name: '✅ Envoyés',        value: String(totalOk),             inline: true },
-          { name: '⏭️ Ignorés',       value: String(totalSkip),           inline: true },
-          { name: '❌ Erreurs',        value: String(totalErrors),         inline: true }
+          { name: '📁 Forums',       value: String(forumsToScan.length), inline: true },
+          { name: '🗂️ Posts',        value: String(totalThreads),        inline: true },
+          { name: '✅ Envoyés',      value: String(totalOk),             inline: true },
+          { name: '⏭️ Ignorés',     value: String(totalSkip),           inline: true },
+          { name: '❌ Erreurs',      value: String(totalErrors),         inline: true }
         )
         .setFooter({ text: 'Elite Corp — Dashboard' })
         .setTimestamp();
 
-      await statusMsg?.edit({ content: '', embeds: [embed] }).catch(() =>
-        message.channel.send({ embeds: [embed] }).catch(() => {})
-      );
+      const resultMsg = await message.channel.send({ embeds: [embed] }).catch(() => null);
+      if (resultMsg) setTimeout(() => resultMsg.delete().catch(() => {}), 15000);
 
     } catch (e) {
       console.error('[SCAN] Erreur générale :', e.message);
-      await statusMsg?.edit(`❌ Erreur : ${e.message}`).catch(() =>
-        message.channel.send(`❌ Erreur : ${e.message}`).catch(() => {})
-      );
+      await statusMsg?.delete().catch(() => {});
+      const errMsg = await message.channel.send(`❌ Erreur : ${e.message}`).catch(() => null);
+      if (errMsg) setTimeout(() => errMsg.delete().catch(() => {}), 8000);
     }
   }
 };
+
+/**
+ * Supprime tous les messages du bot dans un thread
+ */
+async function deleteBotMessages(thread, botUserId) {
+  try {
+    const messages = await thread.messages.fetch({ limit: 50 }).catch(() => null);
+    if (!messages) return;
+    const botMessages = messages.filter(m => m.author.id === botUserId);
+    for (const msg of botMessages.values()) {
+      await msg.delete().catch(() => {});
+      await new Promise(r => setTimeout(r, 200));
+    }
+  } catch (e) {
+    // Silencieux
+  }
+}
