@@ -26,6 +26,13 @@ module.exports = [
         const starter = await thread.fetchStarterMessage().catch(() => null);
         if (!starter) return;
 
+        // Vérifier que l'auteur est mod ou admin
+        const member = await thread.guild.members.fetch(starter.author.id).catch(() => null);
+        if (!member || !member.permissions.has('ManageMessages')) {
+          console.log(`[INTERIM] Post ignoré — ${starter.author.tag} n'est pas mod`);
+          return;
+        }
+
         const content = starter.content.trim();
         const profile = parseContractMessage(content, thread.name) || { poste: thread.name };
         const photoUrl = extractPhoto(starter);
@@ -57,49 +64,12 @@ module.exports = [
     }
   },
 
-  // ── Message dans un thread du forum ────────────────────────────────────────
+  // ── Événement 2 : Message dans un thread du forum ─────────────────────────
+  // DESACTIVE — enrichissement automatique supprimé à la demande
   {
     name: 'messageCreate',
     async execute(message, client) {
-      if (message.author.bot) return;
-      if (!message.guild) return;
-      if (!message.channel.isThread()) return;
-      if (message.channel.parentId !== INTERIM_FORUM_ID) return;
-
-      const content = message.content.trim();
-      if (content.length < 5) return;
-
-      try {
-        const existing = await getProfileByThread(message.channel.id);
-        if (!existing) return;
-
-        const newData = parseContractMessage(content, message.channel.name);
-        if (!newData) return;
-
-        const photoUrl = extractPhoto(message);
-
-        await upsertProfile({
-          discordUserId:   message.author.id,
-          discordUsername: message.author.tag,
-          guildId:         message.guild.id,
-          channelId:       message.channel.parentId,
-          channelName:     message.channel.name,
-          messageId:       existing.message_id,
-          threadId:        message.channel.id,
-          profile: newData, rawContent: content.substring(0, 2000), photoUrl
-        });
-
-        await syncProfile({
-          messageId: existing.message_id, threadId: message.channel.id,
-          discordUserId: message.author.id, discordUsername: message.author.tag,
-          guildId: message.guild.id, channelId: message.channel.parentId, channelName: message.channel.name,
-          ...newData, photoUrl, rawContent: content.substring(0, 2000)
-        });
-
-        console.log(`[INTERIM] Profil enrichi — "${message.channel.name}"`);
-      } catch (e) {
-        console.error('[INTERIM] messageCreate error:', e.message);
-      }
+      // Rien — les mises à jour se font uniquement via les commandes !interim
     }
   }
 ];

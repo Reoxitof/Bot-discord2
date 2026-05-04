@@ -1,6 +1,6 @@
 /**
- * !profil [@user] — Affiche le profil intérimaire
- * !profil search <terme> — Recherche
+ * !profil [@user] — Affiche le profil intérimaire (mod/admin uniquement)
+ * !profil search <terme> — Recherche (mod/admin uniquement)
  */
 const { EmbedBuilder } = require('discord.js');
 const { getProfileByUser, searchProfiles } = require('../interimManager');
@@ -8,6 +8,10 @@ const { getProfileByUser, searchProfiles } = require('../interimManager');
 module.exports = {
   name: 'profil',
   async execute(message, args, client) {
+    // Réservé aux modérateurs et admins
+    if (!message.member.permissions.has('ManageMessages')) {
+      return message.reply('❌ Réservé aux modérateurs.');
+    }
     if (args[0] === 'search' || args[0] === 'recherche') {
       const query = args.slice(1).join(' ');
       if (!query || query.length < 2) return message.reply('❌ Ex: `!profil search Dupont`');
