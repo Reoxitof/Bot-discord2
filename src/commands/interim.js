@@ -1,19 +1,19 @@
 /**
- * !interim — Gestion des profils intérimaires (mod/admin)
+ * !interim — Gestion des profils intérimaires
  * !interim list [actif|inactif|en_attente]
  * !interim stats
  * !interim statut <message_id> <actif|inactif|en_attente>
  * !interim supprimer <message_id>
+ * Accès : mods/admins + IDs autorisés
  */
 const { EmbedBuilder } = require('discord.js');
 const { getProfiles, countProfiles, updateStatus, deleteProfile } = require('../interimManager');
+const { isAllowed } = require('../permissions');
 
 module.exports = {
   name: 'interim',
   async execute(message, args, client) {
-    if (!message.member.permissions.has('ManageMessages')) {
-      return message.reply('❌ Réservé aux modérateurs.');
-    }
+    if (!isAllowed(message.member)) return;
 
     const sub = (args[0] || 'list').toLowerCase();
 
