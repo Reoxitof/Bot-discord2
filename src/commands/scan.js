@@ -1,5 +1,5 @@
 /**
- * !interim scan — Lit tous les posts existants du forum intérimaire
+ * !scan — Lit tous les posts existants du forum intérimaire
  * et les pousse vers le site Elite Corp.
  * Accès : mods/admins + IDs autorisés
  */
@@ -16,29 +16,31 @@ module.exports = {
     if (!isAllowed(message.member)) return;
 
     const guild = message.guild;
-
-    // Trouver le salon forum
-    const forum = guild.channels.cache.get(INTERIM_FORUM_ID);
-    if (!forum) {
-      return message.reply(`❌ Salon forum introuvable (ID: ${INTERIM_FORUM_ID})`);
-    }
-
     const statusMsg = await message.channel.send('🔍 Scan en cours...').catch(() => null);
 
     try {
-      // Récupérer tous les threads actifs + archivés du forum
+      // Fetch le salon forum (pas forcément en cache)
+      const forum = await guild.channels.fetch(INTERIM_FORUM_ID).catch(() => null);
+
+      if (!forum) {
+        return statusMsg?.edit(`❌ Salon forum introuvable (ID: ${INTERIM_FORUM_ID})`).catch(() => {});
+      }
+
+      if (!forum.threads) {
+        return statusMsg?.edit(`❌ \`${forum.name}\` n'est pas un salon Forum.`).catch(() => {});
+      }
+
+      // Récupérer tous les threads actifs + archivés
       let threads = [];
 
-      // Threads actifs
       const active = await forum.threads.fetchActive().catch(() => null);
       if (active) threads.push(...active.threads.values());
 
-      // Threads archivés
       const archived = await forum.threads.fetchArchived({ limit: 100 }).catch(() => null);
       if (archived) threads.push(...archived.threads.values());
 
       if (!threads.length) {
-        return statusMsg.edit('📭 Aucun post trouvé dans le forum.');
+        return statusMsg?.edit('📭 Aucun post trouvé dans le forum.').catch(() => {});
       }
 
       let ok = 0;
@@ -47,22 +49,16 @@ module.exports = {
 
       for (const thread of threads) {
         try {
-          // Récupérer le message initial
           const starter = await thread.fetchStarterMessage().catch(() => null);
           if (!starter) { skip++; continue; }
 
           const content = starter.content.trim();
-          const threadTitle = thread.name;
+          const profile = parseContractMessage(content, thread.name) || { poste: thread.name };
 
-          // Parser le contenu
-          const profile = parseContractMessage(content, threadTitle) || { poste: threadTitle };
-
-          // Récupérer la photo si présente
           const photoUrl = starter.attachments?.find(a =>
             a.contentType?.startsWith('image/') || /\.(png|jpg|jpeg|gif|webp)$/i.test(a.name || '')
           )?.url || null;
 
-          // Envoyer vers Elite Corp
           await syncProfile({
             messageId:       starter.id,
             threadId:        thread.id,
@@ -77,8 +73,6 @@ module.exports = {
           });
 
           ok++;
-
-          // Petite pause pour ne pas spammer l'API
           await new Promise(r => setTimeout(r, 500));
 
         } catch (e) {
@@ -91,10 +85,10 @@ module.exports = {
         .setColor(ok > 0 ? 0x57F287 : 0xED4245)
         .setTitle('📊 Scan terminé')
         .addFields(
-          { name: '✅ Envoyés',  value: String(ok),     inline: true },
-          { name: '⏭️ Ignorés', value: String(skip),   inline: true },
-          { name: '❌ Erreurs', value: String(errors),  inline: true },
-          { name: '📁 Total',   value: String(threads.length), inline: true }
+          { name: '✅ Envoyés',  value: String(ok),             inline: true },
+          { name: '⏭️ Ignorés', value: String(skip),           inline: true },
+          { name: '❌ Erreurs', value: String(errors),          inline: true },
+          { name: '📁 Total',   value: String(threads.length),  inline: true }
         )
         .setFooter({ text: 'Elite Corp — Dashboard' })
         .setTimestamp();
