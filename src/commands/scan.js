@@ -9,8 +9,11 @@ const { parseContractMessage } = require('../contractParser');
 const { syncProfile } = require('../dashboardSync');
 const { isAllowed } = require('../permissions');
 
-// ID de la catégorie "Intérimaire"
-const INTERIM_CATEGORY_ID = process.env.INTERIM_FORUM_ID || '1498709065558134875';
+// IDs des catégories à scanner
+const CATEGORY_IDS = [
+  process.env.INTERIM_FORUM_ID || '1498709065558134875', // Intérimaire
+  '1497973953011122456'                                   // Deuxième catégorie
+];
 
 module.exports = {
   name: 'scan',
@@ -26,9 +29,9 @@ module.exports = {
       // Fetch tous les salons
       await guild.channels.fetch();
 
-      // Tous les salons dans la catégorie intérimaire (forum + texte)
+      // Tous les salons dans les catégories à scanner (forum + texte)
       const channelsInCategory = guild.channels.cache.filter(c =>
-        c.parentId === INTERIM_CATEGORY_ID && (
+        CATEGORY_IDS.includes(c.parentId) && (
           c.type === ChannelType.GuildForum ||
           c.type === ChannelType.GuildText  ||
           c.type === ChannelType.GuildAnnouncement
@@ -37,7 +40,7 @@ module.exports = {
 
       let forumsToScan = [...channelsInCategory.values()];
 
-      // Fallback : tous les forums du serveur si catégorie vide
+      // Fallback : tous les forums du serveur si catégories vides
       if (!forumsToScan.length) {
         forumsToScan = [...guild.channels.cache.filter(c =>
           c.type === ChannelType.GuildForum
@@ -46,7 +49,7 @@ module.exports = {
 
       if (!forumsToScan.length) {
         await statusMsg?.delete().catch(() => {});
-        return message.channel.send('❌ Aucun salon trouvé dans la catégorie intérimaire.').then(m => {
+        return message.channel.send('❌ Aucun salon trouvé dans les catégories.').then(m => {
           setTimeout(() => m.delete().catch(() => {}), 5000);
         }).catch(() => {});
       }
