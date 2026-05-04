@@ -11,8 +11,13 @@ const { isAllowed } = require('../permissions');
 
 // IDs des catégories à scanner
 const CATEGORY_IDS = [
-  process.env.INTERIM_FORUM_ID || '1498709065558134875', // Intérimaire
-  '1497973953011122456'                                   // Deuxième catégorie
+  process.env.INTERIM_FORUM_ID || '1498709065558134875', // Catégorie Intérimaire
+];
+
+// IDs des forums directs à scanner (pas des catégories)
+// Dans ces forums, le titre du post = nom prénom de la personne
+const DIRECT_FORUM_IDS = [
+  '1497973953011122456' // Forum nommé par nom/prénom
 ];
 
 module.exports = {
@@ -39,6 +44,15 @@ module.exports = {
       );
 
       let forumsToScan = [...channelsInCategory.values()];
+
+      // Ajouter les forums directs (par leur ID)
+      for (const forumId of DIRECT_FORUM_IDS) {
+        const directForum = guild.channels.cache.get(forumId)
+          || await guild.channels.fetch(forumId).catch(() => null);
+        if (directForum && !forumsToScan.find(f => f.id === directForum.id)) {
+          forumsToScan.push(directForum);
+        }
+      }
 
       // Fallback : tous les forums du serveur si catégories vides
       if (!forumsToScan.length) {
@@ -87,7 +101,24 @@ module.exports = {
               const threadTitle = thread.name;
 
               // Parser le contenu + titre comme poste
-              const profile = parseContractMessage(content, threadTitle) || { poste: threadTitle };
+              let profile = parseContractMessage(content, threadTitle) || { poste: threadTitle };
+
+              // Si c'est un forum direct (ID dans DIRECT_FORUM_IDS)
+              // → le titre du post = nom complet de la personne (Prénom Nom OU Nom Prénom)
+              if (DIRECT_FORUM_IDS.includes(forum.id)) {
+                const cleanTitle = threadTitle.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim();
+                const parts = cleanTitle.split(/\s+/);
+                if (!profile.prenom && !profile.nom) {
+                  if (parts.length >= 2) {
+                    // On stocke les deux possibilités — le parser a déjà essayé le contenu
+                    // Par défaut : premier mot = prénom, reste = nom
+                    profile.prenom = parts[0];
+                    profile.nom    = parts.slice(1).join(' ');
+                  } else if (parts.length === 1) {
+                    profile.nom = parts[0];
+                  }
+                }
+              }
 
               // Ignorer si pas assez d'infos pour créer un dossier
               if (!profile.id_employe && (!profile.nom || !profile.prenom)) {
