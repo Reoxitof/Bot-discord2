@@ -111,8 +111,13 @@ async function syncProfile(data) {
     };
 
     if (!body.nom || !body.prenom || !body.id_employe || !body.division) {
-      console.log(`[SYNC] Champs manquants — nom:${body.nom} prenom:${body.prenom} id:${body.id_employe} div:${body.division}`);
-      return;
+      // Essayer quand même si on a au moins id_employe OU nom+prenom
+      if (!body.id_employe && (!body.nom || !body.prenom)) {
+        console.log(`[SYNC] Champs insuffisants — nom:${body.nom} prenom:${body.prenom} id:${body.id_employe} div:${body.division}`);
+        return;
+      }
+      // Mettre une valeur par défaut pour division si manquante
+      if (!body.division) body.division = 'Non défini';
     }
 
     const res = await fetch(`${ELITE_CORP_URL}/api/dossiers-rh/interimaire`, {
