@@ -2,7 +2,7 @@
  * dashboardSync.js
  * Sync profils intérimaires vers le site Elite Corp.
  * Route cible : POST /api/dossiers-rh/interimaire
- * Anti-doublon : vérifie par id_employe avant de créer.
+ * Anti-doublon : vérifie par id_employe, puis par nom+prenom comme fallback.
  */
 
 const ELITE_CORP_URL = (process.env.DASHBOARD_URL || 'https://sitegestion.sliplane.app').replace(/\/$/, '');
@@ -15,42 +15,87 @@ function getHeaders() {
   };
 }
 
+// Cache local des dossiers pour éviter de refetch à chaque appel
+let _dossiersCache = null;
+let _dossiersCacheTime = 0;
+
+async function fetchDossiers() {
+  // Cache 30 secondes
+  if (_dossiersCache && Date.now() - _dossiersCacheTime < 30000) return _dossiersCache;
+
+  const res = await fetch(`${ELITE_CORP_URL}/api/dossiers-rh`, {
+    headers: getHeaders(),
+    signal: AbortSignal.timeout(8000)
+  }).catch(() => null);
+
+  if (res?.ok) {
+    _dossiersCache = await res.json().catch(() => []);
+    _dossiersCacheTime = Date.now();
+    return _dossiersCache;
+  }
+  return [];
+}
+
+function invalidateCache() {
+  _dossiersCache = null;
+  _dossiersCacheTime = 0;
+}
+
+/**
+ * Trouve un dossier existant par id_employe ou par nom+prenom (fallback)
+ */
+function findExisting(dossiers, data) {
+  // 1. Par id_employe (priorité)
+  if (data.id_employe) {
+    const found = dossiers.find(d =>
+      d.id_employe && d.id_employe.trim().toLowerCase() === String(data.id_employe).trim().toLowerCase()
+    );
+    if (found) return found;
+  }
+
+  // 2. Fallback : par nom + prenom
+  if (data.nom && data.prenom) {
+    const nom    = data.nom.trim().toLowerCase();
+    const prenom = data.prenom.trim().toLowerCase();
+    const found = dossiers.find(d => {
+      const dNom    = (d.nom    || d.nom_libre    || '').trim().toLowerCase();
+      const dPrenom = (d.prenom || d.prenom_libre || '').trim().toLowerCase();
+      return dNom === nom && dPrenom === prenom;
+    });
+    if (found) return found;
+  }
+
+  return null;
+}
+
 /**
  * Envoie un profil intérimaire vers le site Elite Corp.
- * Utilise id_employe comme clé d'unicité si disponible.
  */
 async function syncProfile(data) {
   if (!ELITE_CORP_URL) return;
 
   try {
     const headers = getHeaders();
+    const dossiers = await fetchDossiers();
+    const existing = findExisting(dossiers, data);
 
-    // Vérifier si un dossier avec cet id_employe existe déjà
-    if (data.id_employe) {
-      const check = await fetch(`${ELITE_CORP_URL}/api/dossiers-rh`, {
-        headers, signal: AbortSignal.timeout(8000)
+    if (existing) {
+      // Mettre à jour le dossier existant
+      await fetch(`${ELITE_CORP_URL}/api/dossiers-rh/${existing.id}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify({
+          perso:      data.perso      || existing.perso      || '',
+          compte:     data.compte     || existing.compte     || '',
+          id_employe: data.id_employe || existing.id_employe || '',
+          division:   data.entreprise || existing.division   || '',
+        }),
+        signal: AbortSignal.timeout(8000)
       }).catch(() => null);
 
-      if (check?.ok) {
-        const dossiers = await check.json().catch(() => []);
-        const existing = dossiers.find(d => d.id_employe === String(data.id_employe));
-        if (existing) {
-          // Mettre à jour
-          await fetch(`${ELITE_CORP_URL}/api/dossiers-rh/${existing.id}`, {
-            method: 'PUT',
-            headers,
-            body: JSON.stringify({
-              perso:      data.perso      || existing.perso      || '',
-              compte:     data.compte     || existing.compte     || '',
-              id_employe: data.id_employe || existing.id_employe || '',
-              division:   data.entreprise || existing.division   || '',
-            }),
-            signal: AbortSignal.timeout(8000)
-          }).catch(() => null);
-          console.log(`[SYNC] Dossier mis à jour — ID ${data.id_employe}`);
-          return;
-        }
-      }
+      invalidateCache();
+      console.log(`[SYNC] Dossier mis à jour — ${data.prenom} ${data.nom} (ID: ${existing.id})`);
+      return;
     }
 
     // Créer un nouveau dossier intérimaire
@@ -65,7 +110,6 @@ async function syncProfile(data) {
       role:       'interimaire'
     };
 
-    // Vérifier qu'on a les champs obligatoires
     if (!body.nom || !body.prenom || !body.id_employe || !body.division) {
       console.log(`[SYNC] Champs manquants — nom:${body.nom} prenom:${body.prenom} id:${body.id_employe} div:${body.division}`);
       return;
@@ -79,6 +123,7 @@ async function syncProfile(data) {
     }).catch(() => null);
 
     if (res?.ok) {
+      invalidateCache();
       console.log(`[SYNC] Dossier créé — ${body.prenom} ${body.nom}`);
     } else if (res) {
       const err = await res.text().catch(() => '');
