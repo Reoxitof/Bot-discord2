@@ -25,7 +25,7 @@ module.exports = {
       await command.execute(message, args, client);
     } catch (err) {
       console.error(`Erreur commande !${commandName} :`, err.message);
-      message.reply('❌ Une erreur est survenue.').catch(() => {});
+      message.channel.send('❌ Une erreur est survenue.').catch(() => {});
     }
   }
 };

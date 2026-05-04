@@ -23,7 +23,7 @@ module.exports = {
       return message.reply(`❌ Salon forum introuvable (ID: ${INTERIM_FORUM_ID})`);
     }
 
-    const statusMsg = await message.reply('🔍 Scan en cours...');
+    const statusMsg = await message.channel.send('🔍 Scan en cours...').catch(() => null);
 
     try {
       // Récupérer tous les threads actifs + archivés du forum
@@ -99,11 +99,15 @@ module.exports = {
         .setFooter({ text: 'Elite Corp — Dashboard' })
         .setTimestamp();
 
-      await statusMsg.edit({ content: '', embeds: [embed] });
+      await statusMsg?.edit({ content: '', embeds: [embed] }).catch(() =>
+        message.channel.send({ embeds: [embed] }).catch(() => {})
+      );
 
     } catch (e) {
       console.error('[SCAN] Erreur générale :', e.message);
-      await statusMsg.edit(`❌ Erreur : ${e.message}`);
+      await statusMsg?.edit(`❌ Erreur : ${e.message}`).catch(() =>
+        message.channel.send(`❌ Erreur : ${e.message}`).catch(() => {})
+      );
     }
   }
 };
