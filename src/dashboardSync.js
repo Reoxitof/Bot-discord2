@@ -80,16 +80,21 @@ async function syncProfile(data) {
     const existing = findExisting(dossiers, data);
 
     if (existing) {
-      // Mettre à jour le dossier existant
+      // Mettre à jour le dossier existant (avec photo si disponible)
+      const updateBody = {
+        perso:      data.perso      || existing.perso      || '',
+        compte:     data.compte     || existing.compte     || '',
+        id_employe: data.id_employe || existing.id_employe || '',
+        division:   data.entreprise || existing.division   || '',
+      };
+
+      // Ajouter la photo si disponible
+      if (data.photoUrl) updateBody.photo_url = data.photoUrl;
+
       await fetch(`${ELITE_CORP_URL}/api/dossiers-rh/${existing.id}`, {
         method: 'PUT',
         headers,
-        body: JSON.stringify({
-          perso:      data.perso      || existing.perso      || '',
-          compte:     data.compte     || existing.compte     || '',
-          id_employe: data.id_employe || existing.id_employe || '',
-          division:   data.entreprise || existing.division   || '',
-        }),
+        body: JSON.stringify(updateBody),
         signal: AbortSignal.timeout(8000)
       }).catch(() => null);
 
@@ -107,6 +112,7 @@ async function syncProfile(data) {
       compte:     data.compte     || '',
       id_employe: data.id_employe || '',
       division:   data.entreprise || data.channelName || '',
+      photo_url:  data.photoUrl   || '',
       role:       'interimaire'
     };
 

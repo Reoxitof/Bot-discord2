@@ -1,11 +1,9 @@
 /**
- * !purge — Supprime tous les messages du bot dans la catégorie intérimaire
+ * !purge — Supprime tous les messages du bot dans TOUT le serveur
  * Accès : mods/admins + IDs autorisés
  */
 const { ChannelType } = require('discord.js');
 const { isAllowed } = require('../permissions');
-
-const INTERIM_CATEGORY_ID = process.env.INTERIM_FORUM_ID || '1498709065558134875';
 
 module.exports = {
   name: 'purge',
@@ -18,9 +16,11 @@ module.exports = {
     try {
       await guild.channels.fetch();
 
-      // Tous les salons de la catégorie intérimaire
+      // Tous les salons texte + forums du serveur
       const channels = guild.channels.cache.filter(c =>
-        c.parentId === INTERIM_CATEGORY_ID
+        c.type === ChannelType.GuildText ||
+        c.type === ChannelType.GuildForum ||
+        c.type === ChannelType.GuildAnnouncement
       );
 
       let deleted = 0;
@@ -28,9 +28,9 @@ module.exports = {
       for (const channel of channels.values()) {
         try {
           // Supprimer dans le salon principal
-          await deleteBotMsgs(channel, client.user.id);
+          deleted += await deleteBotMsgs(channel, client.user.id);
 
-          // Supprimer dans tous les threads du salon
+          // Supprimer dans tous les threads
           const active   = await channel.threads?.fetchActive().catch(() => null);
           const archived = await channel.threads?.fetchArchived({ limit: 100 }).catch(() => null);
 
@@ -40,12 +40,9 @@ module.exports = {
           ];
 
           for (const thread of threads) {
-            const count = await deleteBotMsgs(thread, client.user.id);
-            deleted += count;
+            deleted += await deleteBotMsgs(thread, client.user.id);
           }
-        } catch (e) {
-          console.error(`[PURGE] Erreur salon "${channel.name}" :`, e.message);
-        }
+        } catch (e) {}
       }
 
       await statusMsg?.delete().catch(() => {});
